@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { RpcException } from '@nestjs/microservices';
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
-import { CreateUserDto } from './dto';
+import { CreateUserDto, LoginUserDto } from './dto';
 import { JwtPayload } from './interfaces';
 
 @Injectable()
@@ -14,6 +14,7 @@ export class AuthService extends PrismaClient implements OnModuleInit {
     await this.$connect();
     this.logger.log('Connected to the database');
   }
+
   constructor(private readonly jwtService: JwtService) {
     super();
   }
@@ -29,7 +30,6 @@ export class AuthService extends PrismaClient implements OnModuleInit {
         message: 'User already exists',
       });
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password: _, ...newUser } = await this.user.create({
       data: {
         email,
@@ -42,6 +42,32 @@ export class AuthService extends PrismaClient implements OnModuleInit {
     const token = this.generateJwt(email);
 
     return { user: newUser, token };
+  }
+
+  async login(loginUserDto: LoginUserDto) {
+    const { email, password } = loginUserDto;
+
+    console.log('login');
+
+    const user = await this.user.findUnique({ where: { email } });
+
+    if (!user)
+      throw new RpcException({
+        status: HttpStatus.UNAUTHORIZED,
+        message: 'User not found',
+      });
+
+    const isMatched = this.comparePassword(password, user.password);
+
+    if (!isMatched)
+      throw new RpcException({
+        status: HttpStatus.UNAUTHORIZED,
+        message: 'Incorrect credentials',
+      });
+
+    const { password: _, ...usr } = user;
+
+    return { user: usr, token: this.generateJwt(user.email) };
   }
 
   async validate(token: string) {
@@ -78,5 +104,9 @@ export class AuthService extends PrismaClient implements OnModuleInit {
   private generateJwt(email: string) {
     const payload = { email };
     return this.jwtService.sign(payload);
+  }
+
+  private comparePassword(password: string, hash: string) {
+    return bcrypt.compareSync(password, hash);
   }
 }
